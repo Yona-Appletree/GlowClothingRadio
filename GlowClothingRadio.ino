@@ -106,7 +106,7 @@ void loop(void) {
         }
     }
 
-    fill_rainbow(leds, NUM_LEDS, (uint8_t) (millis()/10), 3);
-    FastLED.setBrightness(gotByte);
+    fill_rainbow(leds, NUM_LEDS, gotByte, 3);
+    FastLED.setBrightness(16);
     FastLED.show();
 }
