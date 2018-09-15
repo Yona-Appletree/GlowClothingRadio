@@ -33,25 +33,26 @@
 CRGB leds[NUM_LEDS];
 
 
-
 extern HardwareSerial Serial;
 
 
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
-RF24 radio(7,8);
+RF24 radio(7, 8);
 /**********************************************************/
 // Topology
-byte addresses[][6] = {"1Node","2Node"};              // Radio pipe addresses for the 2 nodes to communicate.
+byte addresses[][6] = {"1Node", "2Node"};              // Radio pipe addresses for the 2 nodes to communicate.
 
 // Role management: Set up role.  This sketch uses the same software for all the nodes
 // in this system.  Doing so greatly simplifies testing.
-typedef enum { role_ping_out = 1, role_pong_back } role_e;                 // The various roles supported by this sketch
-const char* role_friendly_name[] = { "invalid", "Ping out", "Pong back"};  // The debug-friendly names of those roles
+typedef enum {
+    role_ping_out = 1, role_pong_back
+} role_e;                 // The various roles supported by this sketch
+const char *role_friendly_name[] = {"invalid", "Ping out", "Pong back"};  // The debug-friendly names of those roles
 
 byte counter = 1;                                                          // A single byte to keep track of the data being sent back and forth
 
 
-void setup(){
+void setup() {
 
     Serial.begin(115200);
 
@@ -70,9 +71,10 @@ void setup(){
     //radio.enableAckPayload();                     // Allow optional ack payloads
     radio.enableDynamicPayloads();                // Ack payloads are dynamic payloads
 
-    if(IS_TRANSMITTER){
-        radio.openWritingPipe(addresses[1]);        // Both radios listen on the same pipes by default, but opposite addresses
-    }else{
+    if (IS_TRANSMITTER) {
+        radio.openWritingPipe(
+                addresses[1]);        // Both radios listen on the same pipes by default, but opposite addresses
+    } else {
         radio.openReadingPipe(1, addresses[1]);
         radio.startListening();
     }
@@ -83,20 +85,20 @@ void setup(){
 
 void loop(void) {
 
-    byte gotByte = 16;
+    static byte gotByte = 16;
 /****************** Ping Out Role ***************************/
 
-    if (IS_TRANSMITTER){                               // Radio is in ping mode
+    if (IS_TRANSMITTER) {                               // Radio is in ping mode
         Serial.print(F("Now sending "));                         // Use a simple byte counter as payload
-        Serial.println(counter);
-        counter ++;
+        Serial.println(gotByte);
+        gotByte++;
 
         unsigned long time = micros();                          // Record the current microsecond count
 
-        if (radio.write(&counter, 1, true) ){                         // Send the counter variable to the other radio
+        if (radio.write(&gotByte, sizeof(gotByte), true)) {                         // Send the counter variable to the other radio
             Serial.println(F("Sent successful"));
 
-        }else{        Serial.println(F("Sending failed.")); }          // If no ack response, sending failed
+        } else { Serial.println(F("Sending failed.")); }          // If no ack response, sending failed
     }
 
 
@@ -105,11 +107,11 @@ void loop(void) {
     else {
         byte pipeNo;                          // Declare variables for the pipe and the byte received
 
-        while(radio.available(&pipeNo)){              // Read all available payloads
-            radio.read( &gotByte, 1 );
+        while (radio.available(&pipeNo)) {              // Read all available payloads
+            radio.read(&gotByte, 1);
 
-            Serial.print(F("Got Data: "));
-            Serial.println(gotByte);
+            //Serial.print(F("Got Data: "));
+            //Serial.println(gotByte);
         }
     }
 
