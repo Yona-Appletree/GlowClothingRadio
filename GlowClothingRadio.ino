@@ -15,9 +15,19 @@
 #include <SPI.h>
 #include <FastLED.h>
 #include "RF24.h"
+#include "configOverride.h"
 
+#ifndef PIN_LED
 #define PIN_LED 4
+#endif
+
+#ifndef NUM_LEDS
 #define NUM_LEDS 50
+#endif
+
+#ifndef IS_TRANSMITTER
+#define IS_TRANSMITTER true
+#endif
 
 // This is an array of leds.  One item for each led in your strip.
 CRGB leds[NUM_LEDS];
@@ -26,9 +36,6 @@ CRGB leds[NUM_LEDS];
 
 extern HardwareSerial Serial;
 
-/****************** User Config ***************************/
-/***      Set this radio as radio number 0 or 1         ***/
-bool isTransmitter = true;
 
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
 RF24 radio(7,8);
@@ -53,7 +60,7 @@ void setup(){
     radio.begin();
     radio.setAutoAck(false);
 
-    if (isTransmitter)
+    if (IS_TRANSMITTER)
         Serial.println("Transmitter Mode!");
     else
         Serial.println("Receiver Mode!");
@@ -63,7 +70,7 @@ void setup(){
     //radio.enableAckPayload();                     // Allow optional ack payloads
     radio.enableDynamicPayloads();                // Ack payloads are dynamic payloads
 
-    if(isTransmitter){
+    if(IS_TRANSMITTER){
         radio.openWritingPipe(addresses[1]);        // Both radios listen on the same pipes by default, but opposite addresses
     }else{
         radio.openReadingPipe(1, addresses[1]);
@@ -79,7 +86,7 @@ void loop(void) {
     byte gotByte = 16;
 /****************** Ping Out Role ***************************/
 
-    if (isTransmitter){                               // Radio is in ping mode
+    if (IS_TRANSMITTER){                               // Radio is in ping mode
         Serial.print(F("Now sending "));                         // Use a simple byte counter as payload
         Serial.println(counter);
         counter ++;
