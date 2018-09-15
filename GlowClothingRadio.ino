@@ -76,12 +76,13 @@ void setup(){
 
 void loop(void) {
 
-
+    byte gotByte = 16;
 /****************** Ping Out Role ***************************/
 
     if (isTransmitter){                               // Radio is in ping mode
         Serial.print(F("Now sending "));                         // Use a simple byte counter as payload
         Serial.println(counter);
+        counter ++;
 
         unsigned long time = micros();                          // Record the current microsecond count
 
@@ -95,7 +96,7 @@ void loop(void) {
 /****************** Pong Back Role ***************************/
 
     else {
-        byte pipeNo, gotByte;                          // Declare variables for the pipe and the byte received
+        byte pipeNo;                          // Declare variables for the pipe and the byte received
 
         while(radio.available(&pipeNo)){              // Read all available payloads
             radio.read( &gotByte, 1 );
@@ -106,6 +107,6 @@ void loop(void) {
     }
 
     fill_rainbow(leds, NUM_LEDS, (uint8_t) (millis()/10), 3);
-    FastLED.setBrightness(16);
+    FastLED.setBrightness(gotByte);
     FastLED.show();
 }
