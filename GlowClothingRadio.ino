@@ -47,17 +47,18 @@ byte counter = 1;                                                          // A 
 void setup(){
 
     Serial.begin(115200);
-    Serial.println(F("RF24/examples/GettingStarted_CallResponse"));
-    Serial.println(F("*** PRESS 'T' to begin transmitting to the other node"));
 
     // Setup and configure radio
 
     radio.begin();
+    radio.setAutoAck(false);
 
-    Serial.println("!!!!!");
+    if (isTransmitter)
+        Serial.println("Transmitter Mode!");
+    else
+        Serial.println("Receiver Mode!");
 
     FastLED.addLeds<WS2812B, PIN_LED, RGB>(leds, NUM_LEDS);
-    FastLED.setBrightness(16);
 
     //radio.enableAckPayload();                     // Allow optional ack payloads
     radio.enableDynamicPayloads();                // Ack payloads are dynamic payloads
@@ -69,7 +70,7 @@ void setup(){
         radio.startListening();
     }
 
-    radio.write(&counter, sizeof(counter), true);          // Pre-load an ack-paylod into the FIFO buffer for pipe 1
+    //radio.write(&counter, sizeof(counter), true);          // Pre-load an ack-paylod into the FIFO buffer for pipe 1
     //radio.printDetails();
 }
 
@@ -79,8 +80,6 @@ void loop(void) {
 /****************** Ping Out Role ***************************/
 
     if (isTransmitter){                               // Radio is in ping mode
-
-        //radio.stopListening();                                  // First, stop listening so we can talk.
         Serial.print(F("Now sending "));                         // Use a simple byte counter as payload
         Serial.println(counter);
 
@@ -90,8 +89,6 @@ void loop(void) {
             Serial.println(F("Sent successful"));
 
         }else{        Serial.println(F("Sending failed.")); }          // If no ack response, sending failed
-
-        delay(1000);  // Try again later
     }
 
 
@@ -109,5 +106,6 @@ void loop(void) {
     }
 
     fill_rainbow(leds, NUM_LEDS, (uint8_t) (millis()/10), 3);
+    FastLED.setBrightness(16);
     FastLED.show();
 }
