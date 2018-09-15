@@ -14,6 +14,8 @@
 
 #include <SPI.h>
 #include <FastLED.h>
+#include <Button.h>
+
 #include "RF24.h"
 #include "configOverride.h"
 
@@ -22,7 +24,7 @@
 #endif
 
 #ifndef NUM_LEDS
-#define NUM_LEDS 50
+#define NUM_LEDS 32
 #endif
 
 #ifndef IS_TRANSMITTER
@@ -32,6 +34,10 @@
 // This is an array of leds.  One item for each led in your strip.
 CRGB leds[NUM_LEDS];
 
+struct {
+    byte hueStart;
+    byte brightness;
+} ledConfig = { 0, 16 };
 
 extern HardwareSerial Serial;
 
@@ -51,6 +57,8 @@ const char *role_friendly_name[] = {"invalid", "Ping out", "Pong back"};  // The
 
 byte counter = 1;                                                          // A single byte to keep track of the data being sent back and forth
 
+
+Button button(3, 1, 1, 100);
 
 void setup() {
 
@@ -85,18 +93,24 @@ void setup() {
 
 void loop(void) {
 
-    static byte gotByte = 16;
-/****************** Ping Out Role ***************************/
+    button.read();
 
-    if (IS_TRANSMITTER) {                               // Radio is in ping mode
-        Serial.print(F("Now sending "));                         // Use a simple byte counter as payload
-        Serial.println(gotByte);
-        gotByte++;
+    if (button.wasReleased()) {
+        if (ledConfig.brightness == 0)
+            ledConfig.brightness = 1;
+        else
+            ledConfig.brightness *= 2;
+
+        Serial.println("Brightness changed");
+    }
+
+    if (IS_TRANSMITTER) {
+        ledConfig.hueStart ++;
 
         unsigned long time = micros();                          // Record the current microsecond count
 
-        if (radio.write(&gotByte, sizeof(gotByte), true)) {                         // Send the counter variable to the other radio
-            Serial.println(F("Sent successful"));
+        if (radio.write(&ledConfig, sizeof(ledConfig), true)) {                         // Send the counter variable to the other radio
+            //Serial.println(F("Sent successful"));
 
         } else { Serial.println(F("Sending failed.")); }          // If no ack response, sending failed
     }
@@ -108,14 +122,14 @@ void loop(void) {
         byte pipeNo;                          // Declare variables for the pipe and the byte received
 
         while (radio.available(&pipeNo)) {              // Read all available payloads
-            radio.read(&gotByte, 1);
+            radio.read(&ledConfig, sizeof(ledConfig));
 
             //Serial.print(F("Got Data: "));
             //Serial.println(gotByte);
         }
     }
 
-    fill_rainbow(leds, NUM_LEDS, gotByte, 3);
-    FastLED.setBrightness(16);
+    fill_rainbow(leds, NUM_LEDS, ledConfig.hueStart, 3);
+    FastLED.setBrightness(ledConfig.brightness);
     FastLED.show();
 }
