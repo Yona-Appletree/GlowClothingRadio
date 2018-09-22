@@ -31,19 +31,23 @@
 #define IS_TRANSMITTER true
 #endif
 
+#ifndef STATUS_LED_COUNT
+#define STATUS_LED_COUNT 8
+#endif
+
 // This is an array of leds.  One item for each led in your strip.
 CRGB leds[NUM_LEDS];
 
-struct {
-    byte hueStart;
+struct LedConfig {
     byte brightness;
-} ledConfig = { 0, 16 };
+    uint16_t packetIndex;
+} ledConfig = { 16, 0 };
 
 extern HardwareSerial Serial;
 
 
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
-RF24 radio(7, 8);
+RF24 radio(/*CE PIN*/ 7, /*CS PIN*/ 8);
 /**********************************************************/
 // Topology
 byte addresses[][6] = {"1Node", "2Node"};              // Radio pipe addresses for the 2 nodes to communicate.
@@ -58,7 +62,64 @@ const char *role_friendly_name[] = {"invalid", "Ping out", "Pong back"};  // The
 byte counter = 1;                                                          // A single byte to keep track of the data being sent back and forth
 
 
-Button button(3, 1, 1, 100);
+Button button(/*PIN */ 3, 1, 1, 100);
+
+void fillLeds(CRGB color, uint8_t start=0, uint8_t count=NUM_LEDS) {
+    for (uint8_t i=start; i<start+count; i++)
+        leds[i] = color;
+}
+
+
+void progressBar(
+        uint8_t fraction,
+        CRGB color,
+        uint8_t start=0,
+        uint8_t count=NUM_LEDS
+) {
+    uint8_t mappedProgress = map8(fraction, 0, count-1);
+    if (fraction > 0 && mappedProgress == 0)
+        mappedProgress = 1;
+
+    fillLeds(color, start, mappedProgress);
+    fillLeds(CRGB::Black, start + mappedProgress, count-mappedProgress);
+}
+
+void showSolidColor(CRGB color) {
+    fillLeds(color);
+    FastLED.show();
+}
+
+bool setupRadio() {
+    Serial.print("Starting Radio... ");
+
+    if (radio.begin()) {
+        Serial.println("OK");
+    } else {
+        Serial.println("FAIL");
+        return false;
+    }
+
+    Serial.print("Configuring Radio Auto Ack... ");
+    radio.setAutoAck(false);
+    Serial.println("OK");
+
+    Serial.print("Enabling Dynamic Payloads... ");
+    radio.enableDynamicPayloads();
+    Serial.println("OK");
+
+    if (IS_TRANSMITTER) {
+        Serial.print("Opening TRANSMIT Pipe... ");
+        radio.openWritingPipe(addresses[1]);
+        Serial.println("OK");
+    } else {
+        Serial.print("Opening RECEIVE Pipe... ");
+        radio.openReadingPipe(1, addresses[1]);
+        radio.startListening();
+        Serial.println("OK");
+    }
+
+    return true;
+}
 
 void setup() {
 
@@ -66,70 +127,158 @@ void setup() {
 
     // Setup and configure radio
 
-    radio.begin();
-    radio.setAutoAck(false);
+    Serial.println("Starting LEDs...");
+    FastLED.addLeds<WS2812B, PIN_LED, GRB>(leds, NUM_LEDS);
 
-    if (IS_TRANSMITTER)
-        Serial.println("Transmitter Mode!");
-    else
-        Serial.println("Receiver Mode!");
+    showSolidColor(CRGB(0, 0, 64));
 
-    FastLED.addLeds<WS2812B, PIN_LED, RGB>(leds, NUM_LEDS);
-
-    //radio.enableAckPayload();                     // Allow optional ack payloads
-    radio.enableDynamicPayloads();                // Ack payloads are dynamic payloads
-
-    if (IS_TRANSMITTER) {
-        radio.openWritingPipe(
-                addresses[1]);        // Both radios listen on the same pipes by default, but opposite addresses
-    } else {
-        radio.openReadingPipe(1, addresses[1]);
-        radio.startListening();
+    while (! setupRadio()) {
+        Serial.println();
+        Serial.println("Waiting 250ms for retry...");
+        showSolidColor(CRGB(64, 0, 0));
+        delay(250);
     }
+
+    Serial.println();
+    Serial.println("Setup Successful");
+    showSolidColor(CRGB(0, 64, 0));
 
     //radio.write(&counter, sizeof(counter), true);          // Pre-load an ack-paylod into the FIFO buffer for pipe 1
     //radio.printDetails();
 }
 
-void loop(void) {
+void cylonAnimation(
+     uint8_t start=0,
+     uint8_t count=NUM_LEDS
+) {
+    fillLeds(CRGB::Black, start, count);
+    uint8_t fraction = triwave8(uint8_t(ledConfig.packetIndex));
+    leds[start + map8(fraction, 0, count-1)] = CRGB::Red;
+}
+
+
+void(* resetFunc) (void) = 0;
+
+void transmitterLoop() {
+    ledConfig.packetIndex ++;
 
     button.read();
-
     if (button.wasReleased()) {
         if (ledConfig.brightness == 0)
             ledConfig.brightness = 1;
         else
             ledConfig.brightness *= 2;
 
-        Serial.println("Brightness changed");
+        Serial.print("Brightness changed to ");
+        Serial.print(ledConfig.brightness);
+        Serial.println();
     }
 
-    if (IS_TRANSMITTER) {
-        ledConfig.hueStart ++;
+    cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
 
-        unsigned long time = micros();                          // Record the current microsecond count
+    // Record the current microsecond count
+    unsigned long time = micros();
 
-        if (radio.write(&ledConfig, sizeof(ledConfig), true)) {                         // Send the counter variable to the other radio
-            //Serial.println(F("Sent successful"));
-
-        } else { Serial.println(F("Sending failed.")); }          // If no ack response, sending failed
+    if (radio.write(&ledConfig, sizeof(ledConfig), true)) {
+        fillLeds(CRGB::Blue, 0, STATUS_LED_COUNT);
+    } else {
+        fillLeds(CRGB::Red, 0, STATUS_LED_COUNT);
+        FastLED.show();
+        Serial.println("Send failed. Rebooting.");
+        delay(1000);
+        resetFunc();
     }
 
-
-/****************** Pong Back Role ***************************/
-
-    else {
-        byte pipeNo;                          // Declare variables for the pipe and the byte received
-
-        while (radio.available(&pipeNo)) {              // Read all available payloads
-            radio.read(&ledConfig, sizeof(ledConfig));
-
-            //Serial.print(F("Got Data: "));
-            //Serial.println(gotByte);
-        }
-    }
-
-    fill_rainbow(leds, NUM_LEDS, ledConfig.hueStart, 3);
     FastLED.setBrightness(ledConfig.brightness);
     FastLED.show();
+}
+
+struct ReceivedPacket {
+    long receivedAtMs;
+    uint16_t packetIndex;
+};
+
+ReceivedPacket recentPackets[64];
+
+void receiverLoop() {
+    static long lastPacketReceivedAtMs = millis();
+    static uint8_t health = 1;
+
+    byte pipeNo;
+
+    LedConfig newConfig = { 16, 0 };
+    bool readPacket = false;
+    while (radio.available(&pipeNo)) {
+        radio.read(&newConfig, sizeof(newConfig));
+        readPacket = true;
+    }
+
+    if (! readPacket) {
+        if (millis() - lastPacketReceivedAtMs > 10000) {
+            FastLED.setBrightness(ledConfig.brightness);
+            showSolidColor(CRGB::Yellow);
+        }
+
+        return;
+    }
+
+    if (newConfig.packetIndex > ledConfig.packetIndex || (millis() - lastPacketReceivedAtMs) > 1000 || ledConfig.packetIndex > 65000) {
+        lastPacketReceivedAtMs = millis();
+    } else {
+        Serial.print("Received out of order packet. last index=");
+        Serial.print(ledConfig.packetIndex);
+        Serial.print("new index=");
+        Serial.print(newConfig.packetIndex);
+        Serial.println();
+        return;
+    }
+
+    uint16_t missedPacketCount = newConfig.packetIndex - ledConfig.packetIndex - 1;
+    if (missedPacketCount < 1) {
+        if (health <= 255-2)
+            health += 2;
+    }
+    else if (missedPacketCount < 2) {
+        if (health <= 255-1)
+            health += 1;
+    } else if (missedPacketCount > 100) {
+        if (health > 10)
+            health -= 10;
+    } else if (missedPacketCount > 10) {
+        if (health > 5)
+            health -= 5;
+    } else if (missedPacketCount > 3) {
+        if (health > 1)
+            health --;
+    }
+
+    ledConfig = newConfig;
+
+    Serial.print("Health: ");
+    Serial.print(health);
+    Serial.print("; Missed Count: ");
+    Serial.print(missedPacketCount);
+    Serial.println();
+
+    progressBar(
+        health,
+        health > 250
+            ? CRGB::Blue
+            : CRGB(CRGB::Red).lerp8(CRGB::Green, health),
+        0,
+        STATUS_LED_COUNT
+    );
+
+    cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
+
+    FastLED.setBrightness(ledConfig.brightness);
+    FastLED.show();
+}
+
+void loop(void) {
+    if (IS_TRANSMITTER) {
+        transmitterLoop();
+    } else {
+        receiverLoop();
+    }
 }
