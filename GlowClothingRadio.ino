@@ -1,74 +1,53 @@
-/*
-   Dec 2014 - TMRh20 - Updated
-   Derived from examples by J. Coliz <maniacbug@ymail.com>
-*/
-/**
- * Example for efficient call-response using ack-payloads
- *
- * This example continues to make use of all the normal functionality of the radios including
- * the auto-ack and auto-retry features, but allows ack-payloads to be written optionlly as well.
- * This allows very fast call-response communication, with the responding radio never having to
- * switch out of Primary Receiver mode to send back a payload, but having the option to switch to
- * primary transmitter if wanting to initiate communication instead of respond to a commmunication.
- */
-
 #include <SPI.h>
 #include <FastLED.h>
 #include <Button.h>
+#include <CircularBuffer.h>
+#include <RF24.h>
 
-#include "RF24.h"
-#include "configOverride.h"
+///////////////////
+// CONFIGURATION
 
-#ifndef PIN_LED
-#define PIN_LED 4
-#endif
+// Kahli's initial NRF24L01 wirings, with the LEDs on Pin 4
+//#include "config/setups/kahliReceiverPin4.h"
 
-#ifndef NUM_LEDS
-#define NUM_LEDS 32
-#endif
+// Kahli's initial NRF24L01 wirings, with the LEDs on Pin 3
+//#include "config/setups/kahliReceiverPin3.h"
 
-#ifndef IS_TRANSMITTER
-#define IS_TRANSMITTER true
-#endif
+// Yona's STM32 testing rig
+//#include "config/setups/yonaStm32Tester.h"
 
-#ifndef STATUS_LED_COUNT
-#define STATUS_LED_COUNT 8
-#endif
+// Yona's Prototype high-power transmitter board
+//#include "config/setups/yonaTransmitter.h"
+
+// Yona's Nano-based PCB
+#include "config/setups/yonaNanoBoard.h"
+
+///////////////////
+///////////////////
+
+#include "config/configOverrides.h"
 
 // This is an array of leds.  One item for each led in your strip.
 CRGB leds[NUM_LEDS];
 
 struct LedConfig {
     byte brightness;
-    uint16_t packetIndex;
+    uint64_t packetIndex;
 } ledConfig = { 16, 0 };
-
-extern HardwareSerial Serial;
 
 
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
-RF24 radio(/*CE PIN*/ 7, /*CS PIN*/ 8);
-/**********************************************************/
-// Topology
-byte addresses[][6] = {"1Node", "2Node"};              // Radio pipe addresses for the 2 nodes to communicate.
-
-// Role management: Set up role.  This sketch uses the same software for all the nodes
-// in this system.  Doing so greatly simplifies testing.
-typedef enum {
-    role_ping_out = 1, role_pong_back
-} role_e;                 // The various roles supported by this sketch
-const char *role_friendly_name[] = {"invalid", "Ping out", "Pong back"};  // The debug-friendly names of those roles
-
-byte counter = 1;                                                          // A single byte to keep track of the data being sent back and forth
+RF24 radio(PIN_CE, PIN_CS);
 
 
-Button button(/*PIN */ 3, 1, 1, 100);
+byte radioAddress[6] = "DINOS";
+
+Button button(/*PIN */ PIN_BUTTON, 1, 1, 100);
 
 void fillLeds(CRGB color, uint8_t start=0, uint8_t count=NUM_LEDS) {
     for (uint8_t i=start; i<start+count; i++)
         leds[i] = color;
 }
-
 
 void progressBar(
         uint8_t fraction,
@@ -82,6 +61,12 @@ void progressBar(
 
     fillLeds(color, start, mappedProgress);
     fillLeds(CRGB::Black, start + mappedProgress, count-mappedProgress);
+
+
+    // End marker
+    if (count > 2) {
+        leds[start + count - 1] = color;
+    }
 }
 
 void showSolidColor(CRGB color) {
@@ -90,7 +75,16 @@ void showSolidColor(CRGB color) {
 }
 
 bool setupRadio() {
-    Serial.print("Starting Radio... ");
+    Serial.print("Starting Radio ");
+
+
+    Serial.print("PIN_CE=");
+    Serial.print(PIN_CE);
+    Serial.print(" PIN_CS=");
+    Serial.print(PIN_CS);
+    Serial.println("...");
+
+    SPI.begin();
 
     if (radio.begin()) {
         Serial.println("OK");
@@ -99,21 +93,28 @@ bool setupRadio() {
         return false;
     }
 
-    Serial.print("Configuring Radio Auto Ack... ");
+    Serial.print("Configuring Radio... ");
     radio.setAutoAck(false);
+    //radio.enableDynamicPayloads();
+    radio.setPayloadSize(sizeof(ledConfig));
+    radio.setRetries(0, 0);
     Serial.println("OK");
 
-    Serial.print("Enabling Dynamic Payloads... ");
-    radio.enableDynamicPayloads();
-    Serial.println("OK");
+    Serial.print("Using 250kbps... ");
+    if (radio.setDataRate(RF24_250KBPS)) {
+        Serial.println("OK");
+    } else {
+        Serial.println("FAIL");
+        return false;
+    }
 
     if (IS_TRANSMITTER) {
         Serial.print("Opening TRANSMIT Pipe... ");
-        radio.openWritingPipe(addresses[1]);
+        radio.openWritingPipe(radioAddress);
         Serial.println("OK");
     } else {
         Serial.print("Opening RECEIVE Pipe... ");
-        radio.openReadingPipe(1, addresses[1]);
+        radio.openReadingPipe(1, radioAddress);
         radio.startListening();
         Serial.println("OK");
     }
@@ -121,22 +122,27 @@ bool setupRadio() {
     return true;
 }
 
-void setup() {
 
+void setup() {
     Serial.begin(115200);
 
     // Setup and configure radio
 
-    Serial.println("Starting LEDs...");
-    FastLED.addLeds<WS2812B, PIN_LED, GRB>(leds, NUM_LEDS);
+    Serial.print("Starting LEDs ");
+    Serial.print("PIN_LED=");
+    Serial.print(PIN_LED);
+    Serial.println(PIN_LED);
+    FastLED.addLeds<WS2812B, PIN_LED, LED_ORDER>(leds, NUM_LEDS);
 
-    showSolidColor(CRGB(0, 0, 64));
+    showSolidColor(CRGB(0, 0, 8));
+
+    delay(100);
 
     while (! setupRadio()) {
         Serial.println();
-        Serial.println("Waiting 250ms for retry...");
-        showSolidColor(CRGB(64, 0, 0));
-        delay(250);
+        Serial.println("Waiting 500ms for retry...");
+        showSolidColor(CRGB(8, 0, 0));
+        delay(500);
     }
 
     Serial.println();
@@ -153,7 +159,7 @@ void cylonAnimation(
 ) {
     fillLeds(CRGB::Black, start, count);
     uint8_t fraction = triwave8(uint8_t(ledConfig.packetIndex));
-    leds[start + map8(fraction, 0, count-1)] = CRGB::Red;
+    leds[start + map8(fraction, 0, count-1)] = CRGB::White;
 }
 
 
@@ -176,11 +182,14 @@ void transmitterLoop() {
 
     cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
 
-    // Record the current microsecond count
-    unsigned long time = micros();
-
-    if (radio.write(&ledConfig, sizeof(ledConfig), true)) {
+    if (radio.writeFast(&ledConfig, sizeof(ledConfig), true)) {
         fillLeds(CRGB::Blue, 0, STATUS_LED_COUNT);
+
+        Serial.print("packetIndex=");
+        Serial.print((uint32_t)ledConfig.packetIndex);
+        Serial.print(" fraction=");
+        Serial.print((uint32_t)ledConfig.packetIndex);
+        Serial.println();
     } else {
         fillLeds(CRGB::Red, 0, STATUS_LED_COUNT);
         FastLED.show();
@@ -189,85 +198,77 @@ void transmitterLoop() {
         resetFunc();
     }
 
-    FastLED.setBrightness(ledConfig.brightness);
-    FastLED.show();
+//    FastLED.setBrightness(ledConfig.brightness);
+//    FastLED.show();
 }
 
 struct ReceivedPacket {
     long receivedAtMs;
-    uint16_t packetIndex;
+    uint64_t packetIndex;
 };
 
-ReceivedPacket recentPackets[64];
+CircularBuffer<ReceivedPacket, SIGNAL_HEALTH_BUFFER_SIZE> recentPackets;
 
 void receiverLoop() {
     static long lastPacketReceivedAtMs = millis();
-    static uint8_t health = 1;
 
     byte pipeNo;
 
-    LedConfig newConfig = { 16, 0 };
-    bool readPacket = false;
+    bool receivedPacket = false;
+
+    long durationSincePrevPacket = (millis() - recentPackets.last().receivedAtMs);
+
     while (radio.available(&pipeNo)) {
-        radio.read(&newConfig, sizeof(newConfig));
-        readPacket = true;
-    }
+        radio.read(&ledConfig, sizeof(ledConfig));
 
-    if (! readPacket) {
-        if (millis() - lastPacketReceivedAtMs > 10000) {
-            FastLED.setBrightness(ledConfig.brightness);
-            showSolidColor(CRGB::Yellow);
-        }
-
-        return;
-    }
-
-    if (newConfig.packetIndex > ledConfig.packetIndex || (millis() - lastPacketReceivedAtMs) > 1000 || ledConfig.packetIndex > 65000) {
+        ReceivedPacket recent = { millis(), ledConfig.packetIndex };
         lastPacketReceivedAtMs = millis();
-    } else {
-        Serial.print("Received out of order packet. last index=");
-        Serial.print(ledConfig.packetIndex);
-        Serial.print("new index=");
-        Serial.print(newConfig.packetIndex);
+        recentPackets.push(recent);
+
+        receivedPacket = true;
+    }
+
+    uint8_t receivedPacketFraction = (uint8_t)min(255, uint64_t (255) * recentPackets.size() / (ledConfig.packetIndex - recentPackets.first().packetIndex) + 1);
+
+    long durationSinceLastPacket = (millis() - lastPacketReceivedAtMs);
+
+    if (receivedPacket) {
+        Serial.print("currentIndex=");
+        Serial.print((uint32_t) ledConfig.packetIndex);
+        Serial.print(" receivedPacketFraction=");
+        Serial.print(receivedPacketFraction);
+        Serial.print(" msSinceFirstPacket=");
+        Serial.print(millis() - recentPackets.first().receivedAtMs);
+        Serial.print(" durationSincePrevPacket=");
+        Serial.print(durationSincePrevPacket);
         Serial.println();
-        return;
     }
 
-    uint16_t missedPacketCount = newConfig.packetIndex - ledConfig.packetIndex - 1;
-    if (missedPacketCount < 1) {
-        if (health <= 255-2)
-            health += 2;
+
+    uint8_t health;
+    if (durationSinceLastPacket < 1000) {
+        progressBar(
+                receivedPacketFraction,
+                CRGB::Blue,
+                0,
+                STATUS_LED_COUNT
+        );
+    } else if (durationSinceLastPacket >= 5000) {
+        progressBar(
+                1,
+                CRGB::Red,
+                0,
+                STATUS_LED_COUNT
+        );
+    } else {
+        uint8_t fraction = 255 - uint8_t(255 * (durationSinceLastPacket-1000) / 4000);
+        progressBar(
+                fraction,
+                CRGB(CRGB::Red).lerp8(CRGB::Yellow, fraction),
+                0,
+                STATUS_LED_COUNT
+        );
     }
-    else if (missedPacketCount < 2) {
-        if (health <= 255-1)
-            health += 1;
-    } else if (missedPacketCount > 100) {
-        if (health > 10)
-            health -= 10;
-    } else if (missedPacketCount > 10) {
-        if (health > 5)
-            health -= 5;
-    } else if (missedPacketCount > 3) {
-        if (health > 1)
-            health --;
-    }
-
-    ledConfig = newConfig;
-
-    Serial.print("Health: ");
-    Serial.print(health);
-    Serial.print("; Missed Count: ");
-    Serial.print(missedPacketCount);
-    Serial.println();
-
-    progressBar(
-        health,
-        health > 250
-            ? CRGB::Blue
-            : CRGB(CRGB::Red).lerp8(CRGB::Green, health),
-        0,
-        STATUS_LED_COUNT
-    );
 
     cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
 
@@ -281,4 +282,11 @@ void loop(void) {
     } else {
         receiverLoop();
     }
+}
+
+/* Don't suck in exceptions, they bloat the code size, see https://github.com/FastLED/FastLED/issues/142 */
+namespace __gnu_cxx {
+  void __verbose_terminate_handler() {
+      while(1);
+  }
 }
