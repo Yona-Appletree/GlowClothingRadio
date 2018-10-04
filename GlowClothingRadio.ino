@@ -28,7 +28,7 @@
 #include "config/configOverrides.h"
 
 // This is an array of leds.  One item for each led in your strip.
-CRGB leds[NUM_LEDS];
+CRGB leds[ATTACHED_LED_COUNT];
 
 #define RECEIVER_COUNT 50
 #define FRAME_LED_COUNT (5*7)
@@ -48,7 +48,7 @@ Button button(/*PIN */ PIN_BUTTON, 1, 1, 100);
 
 uint8_t receiverIndex = 0;
 
-void fillLeds(CRGB color, uint8_t start=0, uint8_t count=NUM_LEDS) {
+void fillLeds(CRGB color, uint8_t start=0, uint8_t count=ATTACHED_LED_COUNT) {
     for (uint8_t i=start; i<start+count; i++)
         leds[i] = color;
 }
@@ -57,7 +57,7 @@ void progressBar(
         uint8_t fraction,
         CRGB color,
         uint8_t start=0,
-        uint8_t count=NUM_LEDS
+        uint8_t count=ATTACHED_LED_COUNT
 ) {
     uint8_t mappedProgress = map8(fraction, 0, count-1);
     if (fraction > 0 && mappedProgress == 0)
@@ -142,7 +142,7 @@ void setup() {
     Serial.print("Starting LEDs ");
     Serial.print("PIN_LED=");
     Serial.println(PIN_LED);
-    FastLED.addLeds<WS2812B, PIN_LED, LED_ORDER>(leds, NUM_LEDS);
+    FastLED.addLeds<WS2812B, PIN_LED, LED_ORDER>(leds, ATTACHED_LED_COUNT);
 
     showSolidColor(CRGB(0, 0, 8));
 
@@ -165,7 +165,7 @@ void setup() {
 
 void cylonAnimation(
      uint8_t start=0,
-     uint8_t count=NUM_LEDS
+     uint8_t count=ATTACHED_LED_COUNT
 ) {
     fillLeds(CRGB::Black, start, count);
     uint8_t fraction = triwave8(uint8_t(ledConfig.packetIndex));
@@ -190,7 +190,7 @@ void transmitterLoop() {
         Serial.println();
     }
 
-    cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
+    cylonAnimation(STATUS_LED_COUNT, ATTACHED_LED_COUNT-STATUS_LED_COUNT);
 
     CRGB frameData[FRAME_LED_COUNT];
     byte radioAddress[6] = "DINOS";
@@ -251,7 +251,7 @@ void receiverLoop() {
         Serial.println("Received packet");
 
 
-        uint8_t ledsFromPacket = min(FRAME_LED_COUNT, NUM_LEDS);
+        uint8_t ledsFromPacket = min(FRAME_LED_COUNT, ATTACHED_LED_COUNT);
         memcpy(leds, readFrame, ledsFromPacket * sizeof(CRGB));
 
 
