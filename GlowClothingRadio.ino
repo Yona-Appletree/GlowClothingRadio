@@ -124,13 +124,15 @@ bool setupRadio() {
 
 
 void setup() {
+
     Serial.begin(115200);
+    Serial.println();
+    Serial.println();
 
     // Setup and configure radio
 
     Serial.print("Starting LEDs ");
     Serial.print("PIN_LED=");
-    Serial.print(PIN_LED);
     Serial.println(PIN_LED);
     FastLED.addLeds<WS2812B, PIN_LED, LED_ORDER>(leds, NUM_LEDS);
 
