@@ -198,8 +198,8 @@ void transmitterLoop() {
         resetFunc();
     }
 
-//    FastLED.setBrightness(ledConfig.brightness);
-//    FastLED.show();
+    FastLED.setBrightness(ledConfig.brightness);
+    FastLED.show();
 }
 
 struct ReceivedPacket {
