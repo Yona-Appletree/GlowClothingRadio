@@ -6,7 +6,7 @@
 #define LED_ORDER        GRB
 
 #define PIN_LED          4
-#define PIN_BUTTON       3
+#define PIN_BUTTON       5
 
 #define PIN_CE           8
 #define PIN_CS           9
