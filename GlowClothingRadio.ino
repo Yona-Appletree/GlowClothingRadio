@@ -30,6 +30,11 @@
 // This is an array of leds.  One item for each led in your strip.
 CRGB leds[NUM_LEDS];
 
+#define RECEIVER_COUNT 50
+#define FRAME_LED_COUNT (5*7)
+
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
+
 struct LedConfig {
     byte brightness;
     uint64_t packetIndex;
@@ -39,10 +44,9 @@ struct LedConfig {
 /* Hardware configuration: Set up nRF24L01 radio on SPI bus plus pins 7 & 8 */
 RF24 radio(PIN_CE, PIN_CS);
 
-
-byte radioAddress[6] = "DINOS";
-
 Button button(/*PIN */ PIN_BUTTON, 1, 1, 100);
+
+uint8_t receiverIndex = 0;
 
 void fillLeds(CRGB color, uint8_t start=0, uint8_t count=NUM_LEDS) {
     for (uint8_t i=start; i<start+count; i++)
@@ -74,9 +78,22 @@ void showSolidColor(CRGB color) {
     FastLED.show();
 }
 
+void startListening() {
+    byte radioAddress[6] = "DINOS";
+    radioAddress[0] = receiverIndex;
+
+    radio.closeReadingPipe(1);
+
+    Serial.print("Opening RECEIVE Pipe ");
+    Serial.print(receiverIndex);
+    Serial.println("...");
+    radio.openReadingPipe(1, radioAddress);
+    radio.startListening();
+    Serial.println("OK");
+}
+
 bool setupRadio() {
     Serial.print("Starting Radio ");
-
 
     Serial.print("PIN_CE=");
     Serial.print(PIN_CE);
@@ -95,36 +112,27 @@ bool setupRadio() {
 
     Serial.print("Configuring Radio... ");
     radio.setAutoAck(false);
-    //radio.enableDynamicPayloads();
-    radio.setPayloadSize(sizeof(ledConfig));
+    radio.enableDynamicPayloads();
+    //radio.setPayloadSize(sizeof(ledConfig));
     radio.setRetries(0, 0);
     Serial.println("OK");
 
-    Serial.print("Using 250kbps... ");
-    if (radio.setDataRate(RF24_250KBPS)) {
+    Serial.print("Using 2mbps... ");
+    if (radio.setDataRate(RF24_2MBPS)) {
         Serial.println("OK");
     } else {
         Serial.println("FAIL");
         return false;
     }
 
-    if (IS_TRANSMITTER) {
-        Serial.print("Opening TRANSMIT Pipe... ");
-        radio.openWritingPipe(radioAddress);
-        Serial.println("OK");
-    } else {
-        Serial.print("Opening RECEIVE Pipe... ");
-        radio.openReadingPipe(1, radioAddress);
-        radio.startListening();
-        Serial.println("OK");
-    }
+    if (! IS_TRANSMITTER)
+        startListening();
 
     return true;
 }
 
 
 void setup() {
-
     Serial.begin(115200);
     Serial.println();
     Serial.println();
@@ -184,21 +192,22 @@ void transmitterLoop() {
 
     cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
 
-    if (radio.writeFast(&ledConfig, sizeof(ledConfig), true)) {
-        fillLeds(CRGB::Blue, 0, STATUS_LED_COUNT);
+    CRGB frameData[FRAME_LED_COUNT];
+    byte radioAddress[6] = "DINOS";
 
-        Serial.print("packetIndex=");
-        Serial.print((uint32_t)ledConfig.packetIndex);
-        Serial.print(" fraction=");
-        Serial.print((uint32_t)ledConfig.packetIndex);
-        Serial.println();
-    } else {
-        fillLeds(CRGB::Red, 0, STATUS_LED_COUNT);
-        FastLED.show();
-        Serial.println("Send failed. Rebooting.");
-        delay(1000);
-        resetFunc();
+    for (uint8_t i=0; i<RECEIVER_COUNT; i++) {
+        radioAddress[0] = i;
+        radio.openWritingPipe(radioAddress);
+
+        fill_rainbow(frameData, FRAME_LED_COUNT, millis()/10*i, 3);
+        radio.write(frameData, FRAME_LED_COUNT*3, true);
     }
+
+    Serial.print("packetIndex=");
+    Serial.print((uint32_t)ledConfig.packetIndex);
+    Serial.print(" fraction=");
+    Serial.print((uint32_t)ledConfig.packetIndex);
+    Serial.println();
 
     FastLED.setBrightness(ledConfig.brightness);
     FastLED.show();
@@ -219,63 +228,36 @@ void receiverLoop() {
     bool receivedPacket = false;
 
     long durationSincePrevPacket = (millis() - recentPackets.last().receivedAtMs);
+    button.read();
+
+    if (button.wasReleased()) {
+        receiverIndex ++;
+        if (receiverIndex >= RECEIVER_COUNT)
+            receiverIndex = 0;
+
+        startListening();
+    }
+
+    CRGB readFrame[FRAME_LED_COUNT];
+    memset(readFrame, 0, sizeof(readFrame));
 
     while (radio.available(&pipeNo)) {
-        radio.read(&ledConfig, sizeof(ledConfig));
-
-        ReceivedPacket recent = { millis(), ledConfig.packetIndex };
-        lastPacketReceivedAtMs = millis();
-        recentPackets.push(recent);
+        radio.read(readFrame, FRAME_LED_COUNT*3);
 
         receivedPacket = true;
     }
 
-    uint8_t receivedPacketFraction = (uint8_t)min(255, uint64_t (255) * recentPackets.size() / (ledConfig.packetIndex - recentPackets.first().packetIndex) + 1);
-
-    long durationSinceLastPacket = (millis() - lastPacketReceivedAtMs);
-
     if (receivedPacket) {
-        Serial.print("currentIndex=");
-        Serial.print((uint32_t) ledConfig.packetIndex);
-        Serial.print(" receivedPacketFraction=");
-        Serial.print(receivedPacketFraction);
-        Serial.print(" msSinceFirstPacket=");
-        Serial.print(millis() - recentPackets.first().receivedAtMs);
-        Serial.print(" durationSincePrevPacket=");
-        Serial.print(durationSincePrevPacket);
-        Serial.println();
+        Serial.println("Received packet");
+
+
+        uint8_t ledsFromPacket = min(FRAME_LED_COUNT, NUM_LEDS);
+        memcpy(leds, readFrame, ledsFromPacket * sizeof(CRGB));
+
+
+        FastLED.setBrightness(ledConfig.brightness);
+        FastLED.show();
     }
-
-
-    uint8_t health;
-    if (durationSinceLastPacket < 1000) {
-        progressBar(
-                receivedPacketFraction,
-                CRGB::Blue,
-                0,
-                STATUS_LED_COUNT
-        );
-    } else if (durationSinceLastPacket >= 5000) {
-        progressBar(
-                1,
-                CRGB::Red,
-                0,
-                STATUS_LED_COUNT
-        );
-    } else {
-        uint8_t fraction = 255 - uint8_t(255 * (durationSinceLastPacket-1000) / 4000);
-        progressBar(
-                fraction,
-                CRGB(CRGB::Red).lerp8(CRGB::Yellow, fraction),
-                0,
-                STATUS_LED_COUNT
-        );
-    }
-
-    cylonAnimation(STATUS_LED_COUNT, NUM_LEDS-STATUS_LED_COUNT);
-
-    FastLED.setBrightness(ledConfig.brightness);
-    FastLED.show();
 }
 
 void loop(void) {
